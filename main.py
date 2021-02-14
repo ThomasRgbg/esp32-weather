@@ -95,7 +95,7 @@ class Wind:
     def __init__(self):
         self.gpio = Pin(23, Pin.IN, Pin.PULL_UP)
         self.timer = Timer(0)
-        self.timerinterval = 30     # 30 second accumulation
+        self.timerinterval = 30    # 30 second accumulation
         self.ticks = 0
         self.speedfactor = 2.4     # 1 tick per second = 2.4 km/h (maybe a bit lower)
                                    # 20ms between tick = 120km/h
@@ -116,6 +116,7 @@ class Wind:
         delta = time.ticks_diff(time.ticks_ms(), self.lastirq)
                 
         if (delta > self.debounce) and (delta > (self.lastdelta/2)):
+#        if (delta > self.debounce):
             self.ticks += 1
             #print("wind tick")
             print('w', end='')
@@ -138,8 +139,9 @@ class Wind:
         self.speed = self.ticks * (self.speedfactor/self.timerinterval)
         self.ticks = 0
         self.peakspeed = 1000/self.mindelta * self.speedfactor
-        # print(self.peakspeed)
+        # print('peak speed', self.peakspeed)
         self.mindelta = self.timerinterval * 1000
+        self.lastdelta = self.debounce
         # print('wind speed', self.speed)
         
     # North: 3348  - 0
@@ -153,21 +155,21 @@ class Wind:
     
     def direction(self):
         lut = { 3348:0, 2200:45, 440:90 , 955:135, 1469:180, 2786:225, 4048: 270, 3782:315}
-        tol = 20
+        tol = 50
         adc = 0
         for i in range(20):
             adc1 = self.adc.read()
             # print(adc1)
             adc += adc1
         adc /= 20
-        # print("adc mean: {0}".format(adc))
+        print("adc mean: {0}".format(adc))
         for z in lut:
             if (adc < z+tol) and (adc > z-tol):
                 return lut[z]
         return 0
 
     def enable(self):
-        self.gpio.irq(handler=self.gpio_irq_callback, trigger=Pin.IRQ_RISING)
+        self.gpio.irq(handler=self.gpio_irq_callback, trigger=Pin.IRQ_FALLING)
         self.timer.init(period=(self.timerinterval*1000), mode=Timer.PERIODIC, callback=self.timer_30s_callback)
         
     def disable(self):
