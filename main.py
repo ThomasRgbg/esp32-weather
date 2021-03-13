@@ -94,13 +94,11 @@ rain=Rain()
 class Wind:
     def __init__(self):
         self.gpio = Pin(23, Pin.IN, Pin.PULL_UP)
-        self.timer = Timer(0)
-        self.timerinterval = 30    # 30 second accumulation
         self.ticks = 0
         self.speedfactor = 2.4     # 1 tick per second = 2.4 km/h (maybe a bit lower)
                                    # 20ms between tick = 120km/h
         self.debounce = 20         # Minmal time between two ticks (debouncer)         
-        self.mindelta = self.timerinterval*1000      # To save minimal distance
+        self.mindelta = 60*1000    # Init for finding minimal delta. 
         self.lastirq = 0           # Timestamp of last IRQ
         self.lastdelta = self.debounce
         self.windticks = []        # List to save deltas in IRQ
@@ -110,6 +108,8 @@ class Wind:
         
         self.adc = ADC(Pin(32))
         self.adc.atten(ADC.ATTN_11DB)
+        
+        self.last_analyis = time.ticks_ms()
 
     def gpio_irq_callback(self, pin):
         if (self.gpio.value() == 0):
@@ -117,29 +117,11 @@ class Wind:
             self.lastirq = time.ticks_ms()
             self.windticks.append(delta)
 
-                
-        #if (delta > self.debounce) and (delta > (self.lastdelta/2)):
-##        if (delta > self.debounce):
-            #self.ticks += 1
-            ##print("wind tick")
-            #print('w', end='')
-            
-            #if delta < self.mindelta:
-                #self.mindelta = delta
+    def analyser(self):
 
-            #self.lastirq = time.ticks_ms()
-            #self.lastdelta = delta
-
-        #else: 
-            ##print("wind bounce")
-            #print('x', end='')
-
-        #print("delta IRQ", delta)
-        
-
-    def timer_30s_callback(self, timer):
-        print('W', end='')
-        print(time.ticks_ms())
+        analyser_delta = time.ticks_diff(time.ticks_ms(), self.last_analyis) / 1000
+        self.last_analyis = time.ticks_ms()
+        print('Wind analyser, delta = {0}'.format(analyser_delta))
 
         # remove first element, since it is corrupted
         # timer runs as IRQ and blocks the GPIO irq
@@ -150,7 +132,6 @@ class Wind:
 #            print(delta, end='')
 
             if (delta > self.debounce) and (delta > (self.lastdelta/2)):
-            #if (delta > self.debounce):
                 self.ticks += 1
                 print('w', end='')
 
@@ -167,13 +148,14 @@ class Wind:
 
         self.windticks = []
 
-        self.speed = self.ticks * (self.speedfactor/self.timerinterval)
+        self.speed = self.ticks * (self.speedfactor/analyser_delta) 
         self.ticks = 0
         self.peakspeed = 1000/self.mindelta * self.speedfactor
         # print('peak speed', self.peakspeed)
-        self.mindelta = self.timerinterval * 1000
+        self.mindelta = analyser_delta * 1000
         self.lastdelta = self.debounce
         # print('wind speed', self.speed)
+        print(' ')
 
     # North: 3348  - 0
     # NE: 2200 - 45
@@ -201,10 +183,9 @@ class Wind:
 
     def enable(self):
         self.gpio.irq(handler=self.gpio_irq_callback, trigger=Pin.IRQ_FALLING)
-        self.timer.init(period=(self.timerinterval*1000), mode=Timer.PERIODIC, callback=self.timer_30s_callback)
         
     def disable(self):
-        self.timer.deinit()
+        pass
    
 wind=Wind()
 
@@ -244,7 +225,9 @@ def mainloop():
     rain.enable()
     sc = connect_mqtt()
     errcount = 0 
-    while True:        
+    while True:   
+        wind.analyser()
+        
         if sc is None:
             errcount += 1
             sc = connect_mqtt()
