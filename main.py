@@ -102,7 +102,8 @@ class Wind:
         self.debounce = 20         # Minmal time between two ticks (debouncer)         
         self.mindelta = self.timerinterval*1000      # To save minimal distance
         self.lastirq = 0           # Timestamp of last IRQ
-        self.lastdelta = self.debounce         
+        self.lastdelta = self.debounce
+        self.windticks = []        # List to save deltas in IRQ
 
         self.speed = 0             # To save speed
         self.peakspeed = 0
@@ -111,31 +112,61 @@ class Wind:
         self.adc.atten(ADC.ATTN_11DB)
 
     def gpio_irq_callback(self, pin):
-        self.gpio.value()
-        
-        delta = time.ticks_diff(time.ticks_ms(), self.lastirq)
-                
-        if (delta > self.debounce) and (delta > (self.lastdelta/2)):
-#        if (delta > self.debounce):
-            self.ticks += 1
-            #print("wind tick")
-            print('w', end='')
-            
-            if delta < self.mindelta:
-                self.mindelta = delta
-
+        if (self.gpio.value() == 0):
+            delta = time.ticks_diff(time.ticks_ms(), self.lastirq)
             self.lastirq = time.ticks_ms()
-            self.lastdelta = delta
+            self.windticks.append(delta)
 
-        else: 
-            #print("wind bounce")
-            print('x', end='')
+                
+        #if (delta > self.debounce) and (delta > (self.lastdelta/2)):
+##        if (delta > self.debounce):
+            #self.ticks += 1
+            ##print("wind tick")
+            #print('w', end='')
+            
+            #if delta < self.mindelta:
+                #self.mindelta = delta
 
-        # print("delta IRQ", delta)
+            #self.lastirq = time.ticks_ms()
+            #self.lastdelta = delta
+
+        #else: 
+            ##print("wind bounce")
+            #print('x', end='')
+
+        #print("delta IRQ", delta)
         
 
     def timer_30s_callback(self, timer):
         print('W', end='')
+        print(time.ticks_ms())
+
+        # remove first element, since it is corrupted
+        # timer runs as IRQ and blocks the GPIO irq
+        # todo: use async 
+        self.windticks.pop(0)
+
+        for delta in self.windticks:
+#            print(delta, end='')
+
+            if (delta > self.debounce) and (delta > (self.lastdelta/2)):
+            #if (delta > self.debounce):
+                self.ticks += 1
+                print('w', end='')
+
+                if delta < self.mindelta:
+                    self.mindelta = delta
+
+                self.lastdelta = delta
+
+            else:
+                #print("wind bounce")
+                print('x', end='')
+
+ #           print(' ')
+
+        self.windticks = []
+
         self.speed = self.ticks * (self.speedfactor/self.timerinterval)
         self.ticks = 0
         self.peakspeed = 1000/self.mindelta * self.speedfactor
@@ -143,7 +174,7 @@ class Wind:
         self.mindelta = self.timerinterval * 1000
         self.lastdelta = self.debounce
         # print('wind speed', self.speed)
-        
+
     # North: 3348  - 0
     # NE: 2200 - 45
     # East: 440 - 90
