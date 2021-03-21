@@ -112,10 +112,12 @@ class Wind:
         self.last_analyis = time.ticks_ms()
 
     def gpio_irq_callback(self, pin):
-        if (self.gpio.value() == 0):
-            delta = time.ticks_diff(time.ticks_ms(), self.lastirq)
-            self.lastirq = time.ticks_ms()
-            self.windticks.append(delta)
+        #if (self.gpio.value() == 1):
+        #delta = time.ticks_diff(time.ticks_ms(), self.lastirq)
+        #self.lastirq = time.ticks_ms()
+        #self.windticks.append(delta)
+        self.gpio.value()
+        self.windticks.append(time.ticks_ms())
 
     def analyser(self):
 
@@ -126,17 +128,22 @@ class Wind:
         # remove first element, since it is corrupted
         # timer runs as IRQ and blocks the GPIO irq
         # todo: use async 
-        self.windticks.pop(0)
+#        if len(self.windticks > 2):
+#            self.windticks.pop(0)
 
-        for delta in self.windticks:
+        for i in range(len(self.windticks)-1):
+
+            delta = self.windticks[i+1] - self.windticks[i]
 #            print(delta, end='')
 
-            if (delta > self.debounce) and (delta > (self.lastdelta/2)):
+            #if (delta > self.debounce) and (delta > (self.lastdelta/2)):
+            if (delta > self.debounce):
                 self.ticks += 1
                 print('w', end='')
 
-                if delta < self.mindelta:
+                if delta < self.mindelta and (delta > (self.lastdelta/1.8)):
                     self.mindelta = delta
+                    print('m', end='')
 
                 self.lastdelta = delta
 
@@ -144,7 +151,7 @@ class Wind:
                 #print("wind bounce")
                 print('x', end='')
 
- #           print(' ')
+#            print(' ')
 
         self.windticks = []
 
