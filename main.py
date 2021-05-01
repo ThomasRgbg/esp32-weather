@@ -64,6 +64,9 @@ class Rain:
         self.lastirq = 0            # Timestamp of last IRQ
         self.debounce = 150         # Minmal time between two ticks (debouncer)         
 
+    def reset(self):
+        self.abs_rain = 0
+
     def gpio_irq_callback(self,pin):
         self.gpio.value()
 
@@ -227,6 +230,8 @@ def mainloop():
     rain.enable()
     errcount = 0 
     count = 1
+    lasttimestamp = rtc.datetime()
+
     while True:   
         timestamp = rtc.datetime()
         print("Timestamp: {0}".format(timestamp))
@@ -252,6 +257,10 @@ def mainloop():
         if (count % 600 == 0):
             updatetime(True)
 
+        # Minute of hour has gone down, so one hour passed.
+        if lasttimestamp[5] > timestamp[5]:
+            rain.reset()
+
         if sc.isconnected():
             print("MQTT connected")
             try:
@@ -261,7 +270,7 @@ def mainloop():
                     sc.publish_generic('gas', bme.gas)
                     sc.publish_generic('pressure', bme.pressure)
                 else:
-                    errcount += 1
+                    errcount += 0.1
                 sc.publish_generic('rain',rain.abs())
                 sc.publish_generic('wind',wind.speed)
                 sc.publish_generic('windpeak',wind.peakspeed)
@@ -282,6 +291,7 @@ def mainloop():
         wind.analyser()
 
         count += 1
+        lasttimestamp = timestamp
 
 
 mainloop()
