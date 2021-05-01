@@ -1,11 +1,13 @@
 from machine import Pin, I2C, reset, RTC, Timer, ADC, WDT, unique_id
 import time
+import ntptime
 
 from ubinascii import hexlify
 
 from bme680 import *
 
-from umqtt.robust import MQTTClient
+from mqtt_handler import MQTTHandler
+
 
 #####
 # Schematic/Notes
@@ -134,7 +136,7 @@ class Wind:
         for i in range(len(self.windticks)-1):
 
             delta = self.windticks[i+1] - self.windticks[i]
-#            print(delta, end='')
+            print(delta, end='')
 
             #if (delta > self.debounce) and (delta > (self.lastdelta/2)):
             if (delta > self.debounce):
@@ -151,7 +153,7 @@ class Wind:
                 #print("wind bounce")
                 print('x', end='')
 
-#            print(' ')
+            print(' ')
 
         self.windticks = []
 
@@ -196,50 +198,33 @@ class Wind:
    
 wind=Wind()
 
-#####
-# MQTT connection
-#####
-
-class SensorClient:
-    def __init__(self, sensor, client_id, server):
-        self.sensor = sensor
-        self.mqtt = MQTTClient(client_id, server)
-        self.name = b'pentling/weather'
-        self.mqtt.connect()
-
-    def publish_generic(self, name, value):
-        print("Sending {0} = {1}".format(name, value))
-        self.mqtt.publish(self.name + b'/' + bytes(name, 'ascii'), str(value))    
-
-def connect_mqtt():
-    print("try to connect to MQTT server")
-    try:  
-        sc_try = SensorClient('weather', hexlify(unique_id()), '192.168.0.13')
-    except:
-        sc_try = None
-
-    time.sleep(5)  # Some delay to avoid system getting blocked in a endless loop in case of 
-                   # connection problems, unstable wifi etc. 
-    
-    return sc_try
+sc = MQTTHandler(b'pentling/weather', '192.168.0.13')
 
 #####
 # Main loop
-#####        
+#####
 
 def mainloop():
     wind.enable()
     rain.enable()
-    sc = connect_mqtt()
     errcount = 0 
     while True:   
-        wind.analyser()
-        
-        if sc is None:
+        print("Error counter: {0}".format(errcount))
+
+        if errcount > 20:
+            time.sleep(5)
+            reset()
+            
+        wdt.feed()
+
+        if not wlan.isconnected():
+            print("WLAN not connected")
             errcount += 1
-            sc = connect_mqtt()
+            time.sleep(5)
             continue
-        else:
+
+        if sc.isconnected():
+            print("MQTT connected")
             try:
                 if bme != None:
                     sc.publish_generic('temperature', bme.temperature)
@@ -252,17 +237,19 @@ def mainloop():
                 sc.publish_generic('winddirection',wind.direction())
             except:
                 errcount += 1
-
-        print("Error counter: {0}".format(errcount))
-
-        if errcount > 20:
-            reset()
-            
-        wdt.feed()
+        else:
+            print("MQTT not connected - try to reconnect")
+            sc.connect()
+            errcount += 1
+            time.sleep(5)
+            continue
 
         print(' ')
         time.sleep(20)
         print(' ')
+
+        wind.analyser()
+
 
 mainloop()
 
