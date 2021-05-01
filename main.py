@@ -198,20 +198,43 @@ class Wind:
    
 wind=Wind()
 
+#####
+# Some more stuff
+#####
+
+def updatetime(force):
+    if (rtc.datetime()[0] < 2020) or (force is True):
+        if wlan.isconnected():
+            print("try to set RTC")
+            try:
+                ntptime.settime()
+            except:  
+                print("Some error around time setting, likely timeout")
+    else:
+        print("RTC time looks already reasonable: {0}".format(rtc.datetime()))
+
+
 sc = MQTTHandler(b'pentling/weather', '192.168.0.13')
+rtc = RTC()
 
 #####
 # Main loop
 #####
 
 def mainloop():
+    updatetime(True)
     wind.enable()
     rain.enable()
     errcount = 0 
+    count = 1
     while True:   
+        timestamp = rtc.datetime()
+        print("Timestamp: {0}".format(timestamp))
+        print("Count: {0}".format(count))
+
         print("Error counter: {0}".format(errcount))
 
-        if errcount > 20:
+        if errcount > 100:
             time.sleep(5)
             reset()
             
@@ -219,9 +242,15 @@ def mainloop():
 
         if not wlan.isconnected():
             print("WLAN not connected")
-            errcount += 1
+            errcount += 25
             time.sleep(5)
             continue
+        
+        if (count % 10 == 0):
+            updatetime(False)
+
+        if (count % 600 == 0):
+            updatetime(True)
 
         if sc.isconnected():
             print("MQTT connected")
@@ -231,16 +260,18 @@ def mainloop():
                     sc.publish_generic('humidity', bme.humidity)
                     sc.publish_generic('gas', bme.gas)
                     sc.publish_generic('pressure', bme.pressure)
+                else:
+                    errcount += 1
                 sc.publish_generic('rain',rain.abs())
                 sc.publish_generic('wind',wind.speed)
                 sc.publish_generic('windpeak',wind.peakspeed)
                 sc.publish_generic('winddirection',wind.direction())
             except:
-                errcount += 1
+                errcount += 10
         else:
             print("MQTT not connected - try to reconnect")
             sc.connect()
-            errcount += 1
+            errcount += 20
             time.sleep(5)
             continue
 
@@ -249,6 +280,8 @@ def mainloop():
         print(' ')
 
         wind.analyser()
+
+        count += 1
 
 
 mainloop()
