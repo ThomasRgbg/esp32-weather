@@ -334,7 +334,7 @@ class BME680_I2C(Adafruit_BME680):
         :param bool debug: Print debug statements when True.
         :param int refresh_rate: Maximum number of readings per second. Faster property reads
           will be from the previous reading."""
-    def __init__(self, i2c, address=0x77, debug=False, *, refresh_rate=10):
+    def __init__(self, i2c, address=0x76, debug=False, *, refresh_rate=10):
         """Initialize the I2C device at the 'address' given"""
         self._i2c = i2c
         self._address = address
