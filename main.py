@@ -2,11 +2,12 @@ from machine import Pin, I2C, reset, RTC, Timer, ADC, WDT, unique_id
 import time
 import ntptime
 
-from ubinascii import hexlify
-
-from bme680 import *
+import uasyncio
+import gc
+import micropython
 
 from mqtt_handler import MQTTHandler
+from bme680 import *
 
 
 #####
@@ -30,12 +31,19 @@ from mqtt_handler import MQTTHandler
 # D18 CLK
 # D19 SDA
 
+time.sleep(2)
+errcount = 0
+
+def get_errcount():
+    global errcount
+    return errcount
+
+
 #####
-# Watchdog - 60 seconds, need to be larger then loop time below
+# Watchdog - 180 seconds, need to be larger then loop time below
 #####
 
-wdt = WDT(timeout=60000)
-
+wdt = WDT(timeout=180000)
 
 #####
 # BME680 Temp/Hum/Pressure
@@ -44,12 +52,12 @@ wdt = WDT(timeout=60000)
 i2c0 = I2C(0)
 
 try:
-    bme = BME680_I2C(i2c0)
+    bme0 = BME680_I2C(i2c0)
 except:
-    bme = None
+    bme0 = None
 
 def bme_debug():
-    print(bme.temperature, bme.humidity, bme.pressure, bme.gas)
+    print(bme0.temperature, bme0.humidity, bme0.pressure, bme0.gas)
 
 
 #####
@@ -102,7 +110,7 @@ class Wind:
         self.ticks = 0
         self.speedfactor = 2.4     # 1 tick per second = 2.4 km/h (maybe a bit lower)
                                    # 20ms between tick = 120km/h
-        self.debounce = 20         # Minmal time between two ticks (debouncer)         
+        self.debounce = 10         # Minmal time between two ticks (debouncer)         
         self.mindelta = 60*1000    # Init for finding minimal delta. 
         self.lastirq = 0           # Timestamp of last IRQ
         self.lastdelta = self.debounce
@@ -147,6 +155,9 @@ class Wind:
                 print('w', end='')
 
                 if delta < self.mindelta and (delta > (self.lastdelta/1.8)):
+                    #if i > 1:
+                    #    self.mindelta = self.windticks[i+1] - self.windticks[i-1]
+                    #else:
                     self.mindelta = delta
                     print('m', end='')
 
@@ -218,32 +229,31 @@ def updatetime(force):
 
 
 sc = MQTTHandler(b'pentling/weather', '192.168.0.13')
+sc.register_publisher('errcount', get_errcount)
 rtc = RTC()
 
 #####
-# Main loop
+# Task definition
 #####
 
-def mainloop():
-    updatetime(True)
-    wind.enable()
-    rain.enable()
-    errcount = 0 
+async def housekeeping():
+    global errcount
     count = 1
-    lasttimestamp = rtc.datetime()
 
-    while True:   
+    lasttimestamp = rtc.datetime()
+    while True:
+        print("housekeeping()")
         timestamp = rtc.datetime()
         print("Timestamp: {0}".format(timestamp))
         print("Count: {0}".format(count))
-
         print("Error counter: {0}".format(errcount))
+        
+        wdt.feed()
 
+        # Too many errors, e.g. could not connect to MQTT
         if errcount > 100:
             time.sleep(5)
             reset()
-            
-        wdt.feed()
 
         if not wlan.isconnected():
             print("WLAN not connected")
@@ -257,43 +267,97 @@ def mainloop():
         if (count % 600 == 0):
             updatetime(True)
 
+        gc.collect()
+        micropython.mem_info()
+
+        count += 1
+        await uasyncio.sleep_ms(60000)
+
+
+async def handle_rain():
+    global errcount
+    rain.enable()
+    while True:
+
         # Minute of hour has gone down, so one hour passed.
-        if lasttimestamp[5] > timestamp[5]:
+        # if lasttimestamp[5] > timestamp[5]:
+        #    rain.reset()
+        timestamp = rtc.datetime()
+        if timestamp[5] == 0:
             rain.reset()
 
         if sc.isconnected():
-            print("MQTT connected")
-            try:
-                if bme != None:
-                    sc.publish_generic('temperature', bme.temperature)
-                    sc.publish_generic('humidity', bme.humidity)
-                    sc.publish_generic('gas', bme.gas)
-                    sc.publish_generic('pressure', bme.pressure)
-                else:
-                    errcount += 0.1
-                sc.publish_generic('rain',rain.abs())
-                sc.publish_generic('wind',wind.speed)
-                sc.publish_generic('windpeak',wind.peakspeed)
-                sc.publish_generic('winddirection',wind.direction())
-            except:
-                errcount += 10
+            sc.publish_generic('rain',rain.abs())
+
+        await uasyncio.sleep_ms(60000)
+
+
+async def handle_wind():
+    global errcount
+    wind.enable()
+    while True:
+        wind.analyser()
+        if sc.isconnected():
+            sc.publish_generic('wind',wind.speed)
+            sc.publish_generic('windpeak',wind.peakspeed)
+            sc.publish_generic('winddirection',wind.direction())
+
+        await uasyncio.sleep_ms(20000)
+
+
+async def handle_mqtt():
+    global errcount
+
+    while True:
+        # Generic MQTT
+        if sc.isconnected():
+            print("handle_mqtt() - connected")
+            for i in range(59):
+                sc.mqtt.check_msg()
+                await uasyncio.sleep_ms(1000)
+            sc.publish_all()
+
         else:
             print("MQTT not connected - try to reconnect")
             sc.connect()
-            errcount += 20
-            time.sleep(5)
-            continue
+            errcount += 1
+            await uasyncio.sleep_ms(19000)
 
-        print(' ')
-        time.sleep(20)
-        print(' ')
-
-        wind.analyser()
-
-        count += 1
-        lasttimestamp = timestamp
+        await uasyncio.sleep_ms(1000)
 
 
-mainloop()
+async def handle_bme():
+    global errcount
+    while True:
+        # Handle temperature/pressure
+        print("handle_bme()")
+        try:
+            if bme0 != None and sc.isconnected():
+                sc.publish_generic('temperature', bme0.temperature)
+                sc.publish_generic('humidity', bme0.humidity)
+                sc.publish_generic('gas', bme0.gas)
+                sc.publish_generic('pressure', bme0.pressure)
+            else:
+                errcount += 0.1
+        except:
+            errcount += 10
+        await uasyncio.sleep_ms(60000)
 
+
+#####
+# Main loop
+#####
+
+updatetime(True)
+
+main_loop = uasyncio.get_event_loop()
+
+main_loop.create_task(housekeeping())
+main_loop.create_task(handle_wind())
+main_loop.create_task(handle_rain())
+main_loop.create_task(handle_mqtt())
+main_loop.create_task(handle_bme())
+
+main_loop.run_forever()
+main_loop.close()
 
