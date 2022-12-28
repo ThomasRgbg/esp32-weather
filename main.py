@@ -333,7 +333,7 @@ async def handle_bme():
         print("handle_bme()")
         try:
             if bme0 != None and sc.isconnected():
-                sc.publish_generic('temperature', bme0.temperature)
+                sc.publish_generic('temperature', bme0.temperature-4.5)
                 sc.publish_generic('humidity', bme0.humidity)
                 sc.publish_generic('gas', bme0.gas)
                 sc.publish_generic('pressure', bme0.pressure)
