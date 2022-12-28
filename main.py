@@ -52,7 +52,7 @@ wdt = WDT(timeout=180000)
 i2c0 = I2C(0)
 
 try:
-    bme0 = BME680_I2C(i2c0)
+    bme0 = BME680_I2C(i2c0, address=0x77)
 except:
     bme0 = None
 
